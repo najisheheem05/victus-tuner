@@ -1,7 +1,11 @@
 [package]
-name = "victus-rgb-tuner"
+name = "victuner"
 version = "0.1.0"
 edition = "2024"
+
+[[bin]]
+name = "victuner"
+path = "src/main.rs"
 
 [dependencies]
 libc = "0.2"
