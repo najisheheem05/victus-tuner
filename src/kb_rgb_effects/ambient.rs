@@ -117,6 +117,58 @@ fn get_screen_color(wayland_display: &str, xdg_runtime_dir: &str) -> Option<(u8,
     parse_color(&text)
 }
 
+/// Boost color vibrance by increasing saturation and brightness in HSV space.
+/// This makes muted screen colors appear vivid on the keyboard.
+fn vibrant(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
+    const SAT_BOOST: f32 = 1.6;
+    const VAL_BOOST: f32 = 1.2;
+
+    let rf = r as f32 / 255.0;
+    let gf = g as f32 / 255.0;
+    let bf = b as f32 / 255.0;
+
+    let max = rf.max(gf).max(bf);
+    let min = rf.min(gf).min(bf);
+    let delta = max - min;
+
+    // Hue (0-360)
+    let hue = if delta == 0.0 {
+        0.0
+    } else if max == rf {
+        60.0 * (((gf - bf) / delta) % 6.0)
+    } else if max == gf {
+        60.0 * (((bf - rf) / delta) + 2.0)
+    } else {
+        60.0 * (((rf - gf) / delta) + 4.0)
+    };
+    let hue = if hue < 0.0 { hue + 360.0 } else { hue };
+
+    // Boost saturation and value, clamped to [0, 1]
+    let sat = if max == 0.0 { 0.0 } else { (delta / max) * SAT_BOOST };
+    let sat = sat.min(1.0);
+    let val = (max * VAL_BOOST).min(1.0);
+
+    // HSV → RGB
+    let c = val * sat;
+    let x = c * (1.0 - ((hue / 60.0) % 2.0 - 1.0).abs());
+    let m = val - c;
+
+    let (r1, g1, b1) = match hue as u32 {
+        0..=59 => (c, x, 0.0),
+        60..=119 => (x, c, 0.0),
+        120..=179 => (0.0, c, x),
+        180..=239 => (0.0, x, c),
+        240..=299 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+
+    (
+        ((r1 + m) * 255.0) as u8,
+        ((g1 + m) * 255.0) as u8,
+        ((b1 + m) * 255.0) as u8,
+    )
+}
+
 pub fn ambient() {
     let (wayland_display, xdg_runtime_dir) = detect_wayland_env().unwrap_or_else(|| {
         eprintln!("Error: Could not detect Wayland display.");
@@ -133,9 +185,11 @@ pub fn ambient() {
 
     loop {
         if let Some((r, g, b)) = get_screen_color(&wayland_display, &xdg_runtime_dir) {
-            let sr = (prev.0 as f32 * SMOOTHING + r as f32 * (1.0 - SMOOTHING)) as u8;
-            let sg = (prev.1 as f32 * SMOOTHING + g as f32 * (1.0 - SMOOTHING)) as u8;
-            let sb = (prev.2 as f32 * SMOOTHING + b as f32 * (1.0 - SMOOTHING)) as u8;
+            let (vr, vg, vb) = vibrant(r, g, b);
+
+            let sr = (prev.0 as f32 * SMOOTHING + vr as f32 * (1.0 - SMOOTHING)) as u8;
+            let sg = (prev.1 as f32 * SMOOTHING + vg as f32 * (1.0 - SMOOTHING)) as u8;
+            let sb = (prev.2 as f32 * SMOOTHING + vb as f32 * (1.0 - SMOOTHING)) as u8;
 
             write_rgb(sr, sg, sb);
             prev = (sr, sg, sb);
