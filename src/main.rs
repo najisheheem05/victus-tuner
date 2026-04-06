@@ -7,7 +7,7 @@ use std::env;
 
 use color::preset;
 use ec::{ensure_ec_access, ensure_root, read_rgb, write_rgb};
-use kb_rgb_effects::{alternate, breathe, fade, rainbow};
+use kb_rgb_effects::{alternate, ambient, breathe, fade, rainbow};
 use process::{kill_previous, spawn_background};
 
 fn print_usage() {
@@ -25,6 +25,7 @@ fn print_usage() {
     println!("  victuner rgb breathe <color>      Breathing effect with a preset color");
     println!("  victuner rgb alternate <c1> <c2>  Alternate between two preset colors");
     println!("  victuner rgb fade <c1> <c2>       Smooth fade between two preset colors");
+    println!("  victuner rgb ambient              Match keyboard to screen color (requires grim + ImageMagick)");
 }
 
 fn handle_rgb(args: &[String], worker: bool) {
@@ -56,6 +57,13 @@ fn handle_rgb(args: &[String], worker: bool) {
                 spawn_background(vec!["rgb".into(), "rainbow".into()]);
             }
             rainbow();
+        }
+
+        "ambient" => {
+            if !worker {
+                spawn_background(vec!["rgb".into(), "ambient".into()]);
+            }
+            ambient();
         }
 
         "breathe" => {
