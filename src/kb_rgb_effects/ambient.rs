@@ -73,7 +73,7 @@ fn detect_wayland_env() -> Option<(String, String)> {
     None
 }
 
-/// Capture dominant screen color using grim + ImageMagick (piped, no temp files).
+/// Capture most dominant screen color using grim + ImageMagick color quantization (piped, no temp files).
 fn get_screen_color(wayland_display: &str, xdg_runtime_dir: &str) -> Option<(u8, u8, u8)> {
     let grim = Command::new("grim")
         .arg("-")
@@ -88,7 +88,7 @@ fn get_screen_color(wayland_display: &str, xdg_runtime_dir: &str) -> Option<(u8,
     let grim_stdout = grim.stdout?;
 
     let child = Command::new("magick")
-        .args(["-", "-resize", "1x1!", "txt:-"])
+        .args(["-", "-resize", "100x100!", "-colors", "1", "-depth", "8", "txt:-"])
         .stdin(grim_stdout)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -103,7 +103,7 @@ fn get_screen_color(wayland_display: &str, xdg_runtime_dir: &str) -> Option<(u8,
                 .stderr(Stdio::null())
                 .spawn()?;
             Command::new("convert")
-                .args(["-", "-resize", "1x1!", "txt:-"])
+                .args(["-", "-resize", "100x100!", "-colors", "1", "-depth", "8", "txt:-"])
                 .stdin(grim2.stdout.unwrap())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())
