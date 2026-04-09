@@ -9,3 +9,4 @@ pub use breathe::breathe;
 pub use alternate::alternate;
 pub use fade::fade;
 pub use ambient::ambient;
+pub use ambient::ambient_palette;
