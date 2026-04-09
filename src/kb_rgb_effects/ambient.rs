@@ -6,8 +6,8 @@ use std::{env, fs};
 
 use crate::ec::write_rgb;
 
-const FPS_DELAY: u64 = 80; // ~12 FPS
-const SMOOTHING: f32 = 0.7;
+const FPS_DELAY: u64 = 33; // ~30 FPS
+const SMOOTHING: f32 = 0.45;
 
 /// Parse "srgb(r,g,b)" from ImageMagick output.
 /// Handles both integer values (IMv6: `srgb(42,39,46)`)
@@ -117,12 +117,8 @@ fn get_screen_color(wayland_display: &str, xdg_runtime_dir: &str) -> Option<(u8,
     parse_color(&text)
 }
 
-/// Boost color vibrance by increasing saturation and brightness in HSV space.
-/// This makes muted screen colors appear vivid on the keyboard.
-fn vibrant(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
-    const SAT_BOOST: f32 = 1.6;
-    const VAL_BOOST: f32 = 1.2;
-
+/// Convert RGB (0-255) to HSV (hue 0-360, sat 0-1, val 0-1).
+fn rgb_to_hsv(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
     let rf = r as f32 / 255.0;
     let gf = g as f32 / 255.0;
     let bf = b as f32 / 255.0;
@@ -131,7 +127,6 @@ fn vibrant(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
     let min = rf.min(gf).min(bf);
     let delta = max - min;
 
-    // Hue (0-360)
     let hue = if delta == 0.0 {
         0.0
     } else if max == rf {
@@ -143,17 +138,18 @@ fn vibrant(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
     };
     let hue = if hue < 0.0 { hue + 360.0 } else { hue };
 
-    // Boost saturation and value, clamped to [0, 1]
-    let sat = if max == 0.0 { 0.0 } else { (delta / max) * SAT_BOOST };
-    let sat = sat.min(1.0);
-    let val = (max * VAL_BOOST).min(1.0);
+    let sat = if max == 0.0 { 0.0 } else { delta / max };
 
-    // HSV → RGB
-    let c = val * sat;
-    let x = c * (1.0 - ((hue / 60.0) % 2.0 - 1.0).abs());
-    let m = val - c;
+    (hue, sat, max)
+}
 
-    let (r1, g1, b1) = match hue as u32 {
+/// Convert HSV (hue 0-360, sat 0-1, val 0-1) to RGB (0-255).
+fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (u8, u8, u8) {
+    let c = v * s;
+    let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
+    let m = v - c;
+
+    let (r1, g1, b1) = match h as u32 {
         0..=59 => (c, x, 0.0),
         60..=119 => (x, c, 0.0),
         120..=179 => (0.0, c, x),
@@ -169,7 +165,24 @@ fn vibrant(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
     )
 }
 
-pub fn ambient() {
+/// Boost color vibrance by increasing saturation and brightness in HSV space.
+/// Returns HSV so the caller can smooth in HSV space.
+fn vibrant(r: u8, g: u8, b: u8, level: f32) -> (f32, f32, f32) {
+    let (h, s, v) = rgb_to_hsv(r, g, b);
+    if level <= 0.0 {
+        return (h, s, v);
+    }
+
+    let sat_boost = 1.0 + 0.6 * level;
+    let val_boost = 1.0 + 0.2 * level;
+
+    let s = (s * sat_boost).min(1.0);
+    let v = (v * val_boost).min(1.0);
+
+    (h, s, v)
+}
+
+pub fn ambient(vibrancy: f32) {
     let (wayland_display, xdg_runtime_dir) = detect_wayland_env().unwrap_or_else(|| {
         eprintln!("Error: Could not detect Wayland display.");
         eprintln!("Try running with: sudo -E victuner rgb ambient");
@@ -177,25 +190,33 @@ pub fn ambient() {
     });
 
     eprintln!(
-        "Ambient mode: using {}/{}",
-        xdg_runtime_dir, wayland_display
+        "Ambient mode: display={}/{}, vibrancy={:.1}",
+        xdg_runtime_dir, wayland_display, vibrancy
     );
 
-    let mut prev = (0u8, 0u8, 0u8);
+    let mut prev_hsv = (0.0f32, 0.0f32, 0.0f32);
 
     loop {
         if let Some((r, g, b)) = get_screen_color(&wayland_display, &xdg_runtime_dir) {
-            let (vr, vg, vb) = vibrant(r, g, b);
+            let (vh, vs, vv) = vibrant(r, g, b, vibrancy);
 
-            let sr = (prev.0 as f32 * SMOOTHING + vr as f32 * (1.0 - SMOOTHING)) as u8;
-            let sg = (prev.1 as f32 * SMOOTHING + vg as f32 * (1.0 - SMOOTHING)) as u8;
-            let sb = (prev.2 as f32 * SMOOTHING + vb as f32 * (1.0 - SMOOTHING)) as u8;
+            // Circular hue interpolation (shortest arc on the 360° wheel)
+            let mut dh = vh - prev_hsv.0;
+            if dh > 180.0 {
+                dh -= 360.0;
+            }
+            if dh < -180.0 { 
+                dh += 360.0;
+            }
+            let sh = (prev_hsv.0 + dh * (1.0 - SMOOTHING) + 360.0) % 360.0;
+            let ss = prev_hsv.1 * SMOOTHING + vs * (1.0 - SMOOTHING);
+            let sv = prev_hsv.2 * SMOOTHING + vv * (1.0 - SMOOTHING);
 
+            let (sr, sg, sb) = hsv_to_rgb(sh, ss, sv);
             write_rgb(sr, sg, sb);
-            prev = (sr, sg, sb);
+            prev_hsv = (sh, ss, sv);
         }
 
         thread::sleep(Duration::from_millis(FPS_DELAY));
     }
 }
-

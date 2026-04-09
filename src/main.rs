@@ -25,7 +25,8 @@ fn print_usage() {
     println!("  victuner rgb breathe <color>      Breathing effect with a preset color");
     println!("  victuner rgb alternate <c1> <c2>  Alternate between two preset colors");
     println!("  victuner rgb fade <c1> <c2>       Smooth fade between two preset colors");
-    println!("  victuner rgb ambient              Match keyboard to screen color (requires grim + ImageMagick)");
+    println!("  victuner rgb ambient [level]      Match keyboard to screen color (requires grim + ImageMagick)");
+    println!("                                      level: vibrancy 0-5 (default: 0=raw, higher=more vivid)");
 }
 
 fn handle_rgb(args: &[String], worker: bool) {
@@ -60,10 +61,18 @@ fn handle_rgb(args: &[String], worker: bool) {
         }
 
         "ambient" => {
+            let vibrancy: f32 = args.get(1)
+                .and_then(|v| v.parse::<u8>().ok())
+                .unwrap_or(0) as f32;
+
             if !worker {
-                spawn_background(vec!["rgb".into(), "ambient".into()]);
+                spawn_background(vec![
+                    "rgb".into(),
+                    "ambient".into(),
+                    vibrancy.to_string(),
+                ]);
             }
-            ambient();
+            ambient(vibrancy);
         }
 
         "breathe" => {
